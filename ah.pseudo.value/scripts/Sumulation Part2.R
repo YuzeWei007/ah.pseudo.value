@@ -21,7 +21,6 @@
 
 library(survival)
 library(pseudo)
-library(knitr)
 
 set.seed(12345)
 
@@ -631,42 +630,187 @@ cat("\nSETTING 3: TRUE-CENTERED RMST\n")
 print(round(make_summary_table(all_res_3, "true_R"), 4))
 cat("\n========================================================\n")
 
+############ Make plot
 
-table_s1_F <- as.data.frame(round(make_summary_table(all_res_1, "true_F"), 4))
-table_s1_R <- as.data.frame(round(make_summary_table(all_res_1, "true_R"), 4))
-
-table_s2_F <- as.data.frame(round(make_summary_table(all_res_2, "true_F"), 4))
-table_s2_R <- as.data.frame(round(make_summary_table(all_res_2, "true_R"), 4))
-
-table_s3_F <- as.data.frame(round(make_summary_table(all_res_3, "true_F"), 4))
-table_s3_R <- as.data.frame(round(make_summary_table(all_res_3, "true_R"), 4))
-
+library(knitr)
 
 make_pdf <- function(df, filename, title) {
   
-  latex_table <- kable(df, format = "latex", booktabs = TRUE, caption = title)
+  tex_file <- paste0(filename, ".tex")
+  
+  
+  latex_table <- kable(
+    df,
+    format = "latex",
+    booktabs = TRUE,
+    digits = 4,
+    align = "lcccc",
+    caption = title
+  )
   
   tex <- paste0(
     "\\documentclass{article}
 \\usepackage{booktabs}
+\\usepackage[margin=1in]{geometry}
 \\begin{document}
 
-\\section*{", title, "}
+\\begin{center}
+\\large ", title, "
+\\end{center}
 
 ", latex_table, "
 
 \\end{document}"
   )
   
-  writeLines(tex, paste0(filename, ".tex"))
-  tinytex::pdflatex(paste0(filename, ".tex"))
+  writeLines(tex, tex_file)
+  
+  tinytex::pdflatex(tex_file)
+  
+  unlink(c(
+    tex_file,
+    paste0(filename, ".log"),
+    paste0(filename, ".aux"),
+    paste0(filename, ".out")
+  ))
 }
 
-make_pdf(table_s1_F, "s1_F", "Setting 1: F(tau)")
-make_pdf(table_s1_R, "s1_R", "Setting 1: RMST")
 
-make_pdf(table_s2_F, "s2_F", "Setting 2: F(tau)")
-make_pdf(table_s2_R, "s2_R", "Setting 2: RMST")
+make_pdf(table_s1_F, "simulation2_table1", "Setting 1: F(tau)")
+make_pdf(table_s1_R, "simulation2_table2", "Setting 1: RMST")
 
-make_pdf(table_s3_F, "s3_F", "Setting 3: F(tau)")
-make_pdf(table_s3_R, "s3_R", "Setting 3: RMST")
+make_pdf(table_s2_F, "simulation2_table3", "Setting 2: F(tau)")
+make_pdf(table_s2_R, "simulation2_table4", "Setting 2: RMST")
+
+make_pdf(table_s3_F, "simulation2_table5", "Setting 3: F(tau)")
+make_pdf(table_s3_R, "simulation2_table6", "Setting 3: RMST")
+
+
+
+
+library(knitr)
+
+
+s1_F <- round(make_summary_table(all_res_1, "true_F"), 4)
+s1_R <- round(make_summary_table(all_res_1, "true_R"), 4)
+
+s2_F <- round(make_summary_table(all_res_2, "true_F"), 4)
+s2_R <- round(make_summary_table(all_res_2, "true_R"), 4)
+
+s3_F <- round(make_summary_table(all_res_3, "true_F"), 4)
+s3_R <- round(make_summary_table(all_res_3, "true_R"), 4)
+
+
+make_all_pdf <- function() {
+  
+  tex <- paste0(
+    "\\documentclass{article}
+\\usepackage{booktabs}
+\\usepackage[margin=1in]{geometry}
+\\begin{document}
+
+\\section*{Simulation 2 Results}
+
+\\subsection*{Setting 1: TRUE-CENTERED F}
+", kable(s1_F, "latex", booktabs=TRUE), "
+
+\\subsection*{Setting 1: TRUE-CENTERED RMST}
+", kable(s1_R, "latex", booktabs=TRUE), "
+
+\\subsection*{Setting 2: TRUE-CENTERED F}
+", kable(s2_F, "latex", booktabs=TRUE), "
+
+\\subsection*{Setting 2: TRUE-CENTERED RMST}
+", kable(s2_R, "latex", booktabs=TRUE), "
+
+\\subsection*{Setting 3: TRUE-CENTERED F}
+", kable(s3_F, "latex", booktabs=TRUE), "
+
+\\subsection*{Setting 3: TRUE-CENTERED RMST}
+", kable(s3_R, "latex", booktabs=TRUE), "
+
+\\end{document}"
+  )
+  
+  writeLines(tex, "simulation2_tables.tex")
+  tinytex::pdflatex("simulation2_tables.tex")
+  
+  unlink(c("simulation2_tables.tex",
+           "simulation2_tables.log",
+           "simulation2_tables.aux"))
+}
+
+
+make_all_pdf()
+
+
+save_plot_pdf <- function(n, setting, tau, filename) {
+  
+  pdf(paste0(filename, ".pdf"), width = 10, height = 5)
+  
+  run_once(
+    n = n,
+    setting = setting,
+    tau = tau,
+    make_plot = TRUE
+  )
+  
+  dev.off()
+}
+
+save_plot_pdf(200, 1, tau, "simulation2_fig1")
+save_plot_pdf(200, 2, tau, "simulation2_fig2")
+save_plot_pdf(200, 3, tau, "simulation2_fig3")
+
+save_plot_pdf(500, 1, tau, "simulation2_fig4")
+save_plot_pdf(500, 2, tau, "simulation2_fig5")
+save_plot_pdf(500, 3, tau, "simulation2_fig6")
+
+
+
+full_output <- capture.output({
+  
+  # ===== Setting 1 =====
+  print_setting_header(1)
+  print_simulation_summary(all_res_1$small)
+  print_simulation_summary(all_res_1$mid)
+  print_simulation_summary(all_res_1$large)
+  
+  # ===== Setting 2 =====
+  print_setting_header(2)
+  print_simulation_summary(all_res_2$small)
+  print_simulation_summary(all_res_2$mid)
+  print_simulation_summary(all_res_2$large)
+  
+  # ===== Setting 3 =====
+  print_setting_header(3)
+  print_simulation_summary(all_res_3$small)
+  print_simulation_summary(all_res_3$mid)
+  print_simulation_summary(all_res_3$large)
+  
+})
+
+tex <- paste0(
+  "\\documentclass{article}
+\\usepackage[margin=1in]{geometry}
+\\begin{document}
+
+\\section*{Simulation 2 Full Output}
+
+\\begin{verbatim}
+",
+  paste(full_output, collapse = "\n"),
+  "
+\\end{verbatim}
+
+\\end{document}"
+)
+
+writeLines(tex, "simulation2_full.tex")
+tinytex::pdflatex("simulation2_full.tex")
+
+unlink(c(
+  "simulation2_full.tex",
+  "simulation2_full.log",
+  "simulation2_full.aux"
+))
