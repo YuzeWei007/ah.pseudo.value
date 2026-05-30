@@ -1,0 +1,9 @@
+"Model","Weibull_shape","Censoring","Censoring_label","IPCW_method","nsim","Mean_observed_random_censor_rate","Mean_potential_censor_rate_at_tau","Mean_total_censor_rate"
+"Model 1",1,"none","(a) no censoring","ind",1000,0,0,0.62126
+"Model 1",1,"independent","(b) independent censoring","ind",1000,0.391026666666667,0.498853333333333,0.70151
+"Model 1",1,"group_specific","(c) group-specific censoring","gs",1000,0.41958,0.499346666666667,0.691096666666667
+"Model 1",1,"covariate_dependent","(d) covariate-dependent censoring","cox",1000,0.40958,0.501683333333333,0.69564
+"Model 2",2,"none","(a) no censoring","ind",1000,0,0,0.597133333333333
+"Model 2",2,"independent","(b) independent censoring","ind",1000,0.411493333333333,0.498826666666667,0.710343333333333
+"Model 2",2,"group_specific","(c) group-specific censoring","gs",1000,0.43767,0.500916666666667,0.69234
+"Model 2",2,"covariate_dependent","(d) covariate-dependent censoring","cox",1000,0.429423333333333,0.502986666666667,0.700643333333333

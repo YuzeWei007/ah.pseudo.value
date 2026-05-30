@@ -1,0 +1,9 @@
+"Model","Weibull_shape","Censoring","Censoring_label","IPCW_method","nsim","user","system","elapsed","Mean_censoring_rate"
+"Model 1",1,"none","(a) no censoring","ind",1000,26.4450000000006,0.990999999999985,29.191000000108,0.610053333333333
+"Model 1",1,"independent","(b) independent censoring","ind",1000,27.9210000000003,0.966999999999985,30.7870000000112,0.693883333333333
+"Model 1",1,"group_specific","(c) group-specific censoring","gs",1000,28.9669999999996,1.37900000000002,36.0250000000233,0.68134
+"Model 1",1,"covariate_dependent","(d) covariate-dependent censoring","cox",1000,32.2160000000003,1.25400000000002,38.0460000000894,0.686306666666667
+"Model 2",2,"none","(a) no censoring","ind",1000,105.070000000001,2.74299999999994,116.037000000011,0.583703333333333
+"Model 2",2,"independent","(b) independent censoring","ind",1000,105.934,2.74800000000005,115.17499999993,0.702336666666667
+"Model 2",2,"group_specific","(c) group-specific censoring","gs",1000,106.915,3.07400000000007,120.087000000058,0.683303333333333
+"Model 2",2,"covariate_dependent","(d) covariate-dependent censoring","cox",1000,110.103,3.17200000000003,122.517999999924,0.690576666666667
