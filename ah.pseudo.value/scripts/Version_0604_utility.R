@@ -869,6 +869,93 @@ get_PO_group_specific <- function(X, Delta, tau, group) {
   out
 }
 
+# get_PO_covariate_dependent()
+# Input:
+# X is the observed follow-up time.
+# Delta is the event indicator, where 1 means event and 0 means censored.
+# tau is the fixed evaluation time.
+# covariates4cens is a matrix or data frame of covariates used for the
+# censoring Cox model.
+#
+# Output:
+# A list with two length-n vectors:
+# F = Cox-IPCW pseudo-observations for F(tau).
+# R = Cox-IPCW pseudo-observations for RMST(tau).
+#
+# Purpose:
+# This function computes pseudo-observations when censoring may depend
+# on covariates. It uses eventglm::pseudo_coxph(), which estimates the
+# censoring distribution with a Cox proportional hazards model and then
+# constructs IPCW pseudo-observations.
+
+get_PO_covariate_dependent <- function(X,
+                                       Delta,
+                                       tau,
+                                       covariates4cens,
+                                       ipcw.method = "hajek") {
+  
+  n <- length(X)
+  
+  covariates4cens <- as.data.frame(covariates4cens)
+  
+  if (length(Delta) != n || nrow(covariates4cens) != n) {
+    stop("X, Delta, and covariates4cens must have compatible dimensions.")
+  }
+  
+  if (is.null(colnames(covariates4cens))) {
+    colnames(covariates4cens) <- paste0("cens_cov", seq_len(ncol(covariates4cens)))
+  }
+  
+  df <- data.frame(
+    X = X,
+    Delta = Delta,
+    covariates4cens
+  )
+  
+  cens_vars <- colnames(covariates4cens)
+  
+  formula_cens <- as.formula(
+    paste("~", paste(cens_vars, collapse = " + "))
+  )
+  
+  out <- try({
+    
+    F_hat <- eventglm::pseudo_coxph(
+      formula = survival::Surv(X, Delta) ~ 1,
+      time = tau,
+      cause = 1,
+      data = df,
+      type = "cuminc",
+      formula.censoring = formula_cens,
+      ipcw.method = ipcw.method
+    )
+    
+    R_hat <- eventglm::pseudo_coxph(
+      formula = survival::Surv(X, Delta) ~ 1,
+      time = tau,
+      cause = 1,
+      data = df,
+      type = "rmean",
+      formula.censoring = formula_cens,
+      ipcw.method = ipcw.method
+    )
+    
+    list(
+      F = as.numeric(F_hat),
+      R = as.numeric(R_hat)
+    )
+    
+  }, silent = TRUE)
+  
+  if (inherits(out, "try-error")) return(NULL)
+  
+  if (length(out$F) != n || length(out$R) != n) return(NULL)
+  
+  if (any(!is.finite(out$F)) || any(!is.finite(out$R))) return(NULL)
+  
+  out
+}
+
 # make_ah_covariates()
 # Input: dat is a simulated data object containing a covariates data
 # frame.
@@ -1442,7 +1529,12 @@ fit_GMM_AHCox_with_se <- function(Z, po, ipcw, start,
 one_run <- function(n, beta, tau, pbc_pool,
                     shape = 1.0,
                     censoring = "independent",
-                    run_gmm = TRUE,
+                    run_PO_regular = TRUE,
+                    run_PO_group_specific = FALSE,
+                    run_PO_covariate_dependent = FALSE,
+                    run_AHCox = TRUE,
+                    run_GMM = TRUE,
+                    po_cd_ipcw_method = "hajek",
                     center_vec = NULL) {
   dat <- gen_data_uno(
     n = n,
@@ -1453,24 +1545,96 @@ one_run <- function(n, beta, tau, pbc_pool,
     censoring = censoring
   )
   
-  po <- get_PO(dat$X, dat$Delta, tau)
+  p <- length(beta)
   
-  # po_groupspecific <- get_PO_groupspecific(dat$X, dat$Delta, tau)
-  # po_covariatedependent <- get_PO_covariatedependent(dat$X, dat$Delta, tau)
-  
-  ahcox <- fit_AHCox_uno_with_ipcw(dat, tau)
-  
-  b_po <- fit_PO_with_se(dat$Z, po, beta)
-  
-  # b_po_groupspecific <- fit_PO_with_se(dat$Z, po_groupspecific, beta)
-  # b_po_covariatedependent <- fit_PO_with_se(dat$Z, po_covariatedependent, beta)
-  
-  b_ahcox <- list(
-    beta = ahcox$beta,
-    se = ahcox$se
+  b_po <- list(
+    beta = rep(NA_real_, p),
+    se = rep(NA_real_, p)
   )
   
-  if (run_gmm) {
+  b_po_group_specific <- list(
+    beta = rep(NA_real_, p),
+    se = rep(NA_real_, p)
+  )
+  
+  b_po_covariate_dependent <- list(
+    beta = rep(NA_real_, p),
+    se = rep(NA_real_, p)
+  )
+  
+  b_ahcox <- list(
+    beta = rep(NA_real_, p),
+    se = rep(NA_real_, p)
+  )
+  
+  b_gmm <- list(
+    beta = rep(NA_real_, p),
+    se = rep(NA_real_, p)
+  )
+  
+  po <- NULL
+  ahcox <- NULL
+  
+  # Regular pooled PO
+  if (run_PO_regular || run_GMM) {
+    po <- get_PO(dat$X, dat$Delta, tau)
+  }
+  
+  if (run_PO_regular) {
+    b_po <- fit_PO_with_se(
+      Z = dat$Z,
+      po = po,
+      start = beta
+    )
+  }
+  
+  # Group-specific PO
+  if (run_PO_group_specific) {
+    po_group_specific <- get_PO_group_specific(
+      X = dat$X,
+      Delta = dat$Delta,
+      tau = tau,
+      group = dat$gs_group
+    )
+    
+    b_po_group_specific <- fit_PO_with_se(
+      Z = dat$Z,
+      po = po_group_specific,
+      start = beta
+    )
+  }
+  
+  # Covariate-dependent PO
+  if (run_PO_covariate_dependent) {
+    po_covariate_dependent <- get_PO_covariate_dependent(
+      X = dat$X,
+      Delta = dat$Delta,
+      tau = tau,
+      covariates4cens = make_cens_covariates(dat),
+      ipcw.method = po_cd_ipcw_method
+    )
+    
+    b_po_covariate_dependent <- fit_PO_with_se(
+      Z = dat$Z,
+      po = po_covariate_dependent,
+      start = beta
+    )
+  }
+  
+  # AH-Cox
+  if (run_AHCox || run_GMM) {
+    ahcox <- fit_AHCox_uno_with_ipcw(dat, tau)
+  }
+  
+  if (run_AHCox) {
+    b_ahcox <- list(
+      beta = ahcox$beta,
+      se = ahcox$se
+    )
+  }
+  
+  # Stacked GMM
+  if (run_GMM) {
     b_gmm <- fit_GMM_AHCox_with_se(
       dat$Z,
       po,
@@ -1478,21 +1642,20 @@ one_run <- function(n, beta, tau, pbc_pool,
       beta,
       center_vec = center_vec
     )
-  } else {
-    b_gmm <- list(
-      beta = rep(NA_real_, length(beta)),
-      se = rep(NA_real_, length(beta))
-    )
   }
   
   list(
     beta = list(
       PO = b_po$beta,
+      PO_group_specific = b_po_group_specific$beta,
+      PO_covariate_dependent = b_po_covariate_dependent$beta,
       AHCox = b_ahcox$beta,
       GMM = b_gmm$beta
     ),
     se = list(
       PO = b_po$se,
+      PO_group_specific = b_po_group_specific$se,
+      PO_covariate_dependent = b_po_covariate_dependent$se,
       AHCox = b_ahcox$se,
       GMM = b_gmm$se
     ),
@@ -1501,6 +1664,10 @@ one_run <- function(n, beta, tau, pbc_pool,
     total_censor_rate = dat$total_censor_rate
   )
 }
+  
+  # po_covariate_dependent <- get_PO_covariate_dependent(dat$X, dat$Delta, tau))
+  
+ 
 
 # run_sim()
 # Input: nsim is the number of simulation replicates, n is the sample
@@ -1512,12 +1679,17 @@ one_run <- function(n, beta, tau, pbc_pool,
 # estimates and standard errors, censoring-rate summaries, and the
 # simulation settings.
 # This function repeats one_run many times, stores the results for the
-# three estimators, and records censoring information for each
+# four estimators, and records censoring information for each
 # simulation replicate.
 run_sim <- function(nsim, n, beta, tau, pbc_pool,
                     shape = 1.0,
                     censoring = "independent",
-                    run_gmm = TRUE) {
+                    run_PO_regular = TRUE,
+                    run_PO_group_specific = FALSE,
+                    run_PO_covariate_dependent = FALSE,
+                    run_AHCox = TRUE,
+                    run_GMM = TRUE,
+                    po_cd_ipcw_method = "hajek") {
   p <- length(beta)
   
   center_vec <- get_center_from_pbc_pool(pbc_pool)
@@ -1525,11 +1697,15 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
   res <- list(
     beta = list(
       PO = matrix(NA_real_, nsim, p),
+      PO_group_specific = matrix(NA_real_, nsim, p),
+      PO_covariate_dependent = matrix(NA_real_, nsim, p),
       AHCox = matrix(NA_real_, nsim, p),
       GMM = matrix(NA_real_, nsim, p)
     ),
     se = list(
       PO = matrix(NA_real_, nsim, p),
+      PO_group_specific = matrix(NA_real_, nsim, p),
+      PO_covariate_dependent = matrix(NA_real_, nsim, p),
       AHCox = matrix(NA_real_, nsim, p),
       GMM = matrix(NA_real_, nsim, p)
     ),
@@ -1554,7 +1730,12 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
         pbc_pool = pbc_pool,
         shape = shape,
         censoring = censoring,
-        run_gmm = run_gmm,
+        run_PO_regular = run_PO_regular,
+        run_PO_group_specific = run_PO_group_specific,
+        run_PO_covariate_dependent = run_PO_covariate_dependent,
+        run_AHCox = run_AHCox,
+        run_GMM = run_GMM,
+        po_cd_ipcw_method = po_cd_ipcw_method,
         center_vec = center_vec
       ),
       silent = TRUE
@@ -1565,10 +1746,14 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
     }
     
     res$beta$PO[s, ] <- out$beta$PO
+    res$beta$PO_group_specific[s, ] <- out$beta$PO_group_specific
+    res$beta$PO_covariate_dependent[s, ] <- out$beta$PO_covariate_dependent
     res$beta$AHCox[s, ] <- out$beta$AHCox
     res$beta$GMM[s, ] <- out$beta$GMM
     
     res$se$PO[s, ] <- out$se$PO
+    res$se$PO_group_specific[s, ] <- out$se$PO_group_specific
+    res$se$PO_covariate_dependent[s, ] <- out$se$PO_covariate_dependent
     res$se$AHCox[s, ] <- out$se$AHCox
     res$se$GMM[s, ] <- out$se$GMM
     
@@ -1585,8 +1770,14 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
       tau = tau,
       shape = shape,
       censoring = censoring,
-      ipcw_method = "AH-Cox via embedded fun-ahreg.R",
-      nsim = nsim
+      ipcw_method = paste0("eventglm::pseudo_coxph_", po_cd_ipcw_method),
+      nsim = nsim,
+      run_PO_regular = run_PO_regular,
+      run_PO_group_specific = run_PO_group_specific,
+      run_PO_covariate_dependent = run_PO_covariate_dependent,
+      run_AHCox = run_AHCox,
+      run_GMM = run_GMM,
+      po_cd_ipcw_method = po_cd_ipcw_method
     )
   )
 }
@@ -1681,6 +1872,20 @@ summ_all <- function(res, setting_row) {
       setting_row
     ),
     summ_one(
+      res$res$beta$PO_group_specific,
+      res$res$se$PO_group_specific,
+      res$beta_true,
+      "PO_group_specific",
+      setting_row
+    ),
+    summ_one(
+      res$res$beta$PO_covariate_dependent,
+      res$res$se$PO_covariate_dependent,
+      res$beta_true,
+      "PO_covariate_dependent",
+      setting_row
+    ),
+    summ_one(
       res$res$beta$AHCox,
       res$res$se$AHCox,
       res$beta_true,
@@ -1702,7 +1907,7 @@ summ_all <- function(res, setting_row) {
 # and value_col is the name of the summary column to display.
 # Output: A wide-format table comparing PO-only, AH-Cox-only, and
 # Stacked-GMM-AH-Cox for the chosen value column.
-# This function reshapes a long summary table so that the three
+# This function reshapes a long summary table so that the four
 # estimators appear side by side. It relies on the global beta_true
 # object to determine the parameter ordering.
 make_wide_table <- function(summary_table, value_col) {
@@ -1730,6 +1935,8 @@ make_wide_table <- function(summary_table, value_col) {
     "Censoring_label",
     "Parameter",
     "PO-only",
+    "PO_group_specific",
+    "PO_covariate_dependent",
     "AH-Cox-only",
     "Stacked-GMM-AH-Cox"
   )
@@ -1829,7 +2036,7 @@ make_comparison_table <- function(summary_table) {
 # how close coverage must be to the target level.
 # Output: A table containing bias, SD, coverage, and logical indicators
 # for whether the estimators meet the desired target checks.
-# This function checks whether the three estimators have similar bias,
+# This function checks whether the four estimators have similar bias,
 # whether GMM has the smallest empirical SD, and whether coverage is
 # close to the desired confidence level.
 make_target_check_table <- function(summary_table,
