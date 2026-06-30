@@ -68,9 +68,10 @@ z_crit <- qnorm(1 - (1 - conf_level) / 2)
 
 run_PO_regular <- FALSE
 run_PO_group_specific <- FALSE
-run_PO_covariate_dependent <- TRUE
+run_PO_covariate_dependent <- FALSE
 run_AHCox <- FALSE
 run_GMM <- FALSE
+run_GMM_PO_GS <- TRUE
 
 #po_cd_ipcw_method <- "hajek"
 po_cd_ipcw_method <- "binder"
@@ -80,7 +81,8 @@ methods <- c(
   if (run_PO_group_specific) "PO_group_specific",
   if (run_PO_covariate_dependent) "PO_covariate_dependent",
   if (run_AHCox) "AH-Cox-only",
-  if (run_GMM) "Stacked-GMM-AH-Cox"
+  if (run_GMM) "Stacked-GMM-AH-Cox",
+  if (run_GMM_PO_GS) "Stacked-GMM-POGS-AH-Cox"
 )
 
 
@@ -175,6 +177,7 @@ for (ii in seq_len(nrow(setting_grid))) {
       run_PO_covariate_dependent = run_PO_covariate_dependent,
       run_AHCox = run_AHCox,
       run_GMM = run_GMM,
+      run_GMM_PO_GS = run_GMM_PO_GS,
       po_cd_ipcw_method = po_cd_ipcw_method
     )
   })

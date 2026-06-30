@@ -1534,6 +1534,7 @@ one_run <- function(n, beta, tau, pbc_pool,
                     run_PO_covariate_dependent = FALSE,
                     run_AHCox = TRUE,
                     run_GMM = TRUE,
+                    run_GMM_PO_GS = FALSE,
                     po_cd_ipcw_method = "hajek",
                     center_vec = NULL) {
   dat <- gen_data_uno(
@@ -1572,6 +1573,13 @@ one_run <- function(n, beta, tau, pbc_pool,
     se = rep(NA_real_, p)
   )
   
+  b_gmm_po_gs <- list(
+    beta = rep(NA_real_, p),
+    se = rep(NA_real_, p)
+  )
+  
+  po_group_specific <- NULL
+  
   po <- NULL
   ahcox <- NULL
   
@@ -1589,7 +1597,7 @@ one_run <- function(n, beta, tau, pbc_pool,
   }
   
   # Group-specific PO
-  if (run_PO_group_specific) {
+  if (run_PO_group_specific || run_GMM_PO_GS) {
     po_group_specific <- get_PO_group_specific(
       X = dat$X,
       Delta = dat$Delta,
@@ -1597,11 +1605,13 @@ one_run <- function(n, beta, tau, pbc_pool,
       group = dat$gs_group
     )
     
-    b_po_group_specific <- fit_PO_with_se(
-      Z = dat$Z,
-      po = po_group_specific,
-      start = beta
-    )
+    if (run_PO_group_specific) {
+      b_po_group_specific <- fit_PO_with_se(
+        Z = dat$Z,
+        po = po_group_specific,
+        start = beta
+      )
+    }
   }
   
   # Covariate-dependent PO
@@ -1622,7 +1632,7 @@ one_run <- function(n, beta, tau, pbc_pool,
   }
   
   # AH-Cox
-  if (run_AHCox || run_GMM) {
+  if (run_AHCox || run_GMM || run_GMM_PO_GS) {
     ahcox <- fit_AHCox_uno_with_ipcw(dat, tau)
   }
   
@@ -1644,30 +1654,42 @@ one_run <- function(n, beta, tau, pbc_pool,
     )
   }
   
+  if (run_GMM_PO_GS) {
+    b_gmm_po_gs <- fit_GMM_AHCox_with_se(
+      dat$Z,
+      po_group_specific,
+      ahcox$ipcw,
+      beta,
+      center_vec = center_vec
+    )
+  }
+  
   list(
     beta = list(
       PO = b_po$beta,
       PO_group_specific = b_po_group_specific$beta,
       PO_covariate_dependent = b_po_covariate_dependent$beta,
       AHCox = b_ahcox$beta,
-      GMM = b_gmm$beta
+      GMM = b_gmm$beta,
+      GMM_PO_GS = b_gmm_po_gs$beta
     ),
     se = list(
       PO = b_po$se,
       PO_group_specific = b_po_group_specific$se,
       PO_covariate_dependent = b_po_covariate_dependent$se,
       AHCox = b_ahcox$se,
-      GMM = b_gmm$se
+      GMM = b_gmm$se,
+      GMM_PO_GS = b_gmm_po_gs$se
     ),
     observed_random_censor_rate = dat$observed_random_censor_rate,
     potential_censor_rate_at_tau = dat$potential_censor_rate_at_tau,
     total_censor_rate = dat$total_censor_rate
   )
 }
-  
-  # po_covariate_dependent <- get_PO_covariate_dependent(dat$X, dat$Delta, tau))
-  
- 
+
+# po_covariate_dependent <- get_PO_covariate_dependent(dat$X, dat$Delta, tau))
+
+
 
 # run_sim()
 # Input: nsim is the number of simulation replicates, n is the sample
@@ -1689,6 +1711,7 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
                     run_PO_covariate_dependent = FALSE,
                     run_AHCox = TRUE,
                     run_GMM = TRUE,
+                    run_GMM_PO_GS = FALSE,
                     po_cd_ipcw_method = "hajek") {
   p <- length(beta)
   
@@ -1700,14 +1723,16 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
       PO_group_specific = matrix(NA_real_, nsim, p),
       PO_covariate_dependent = matrix(NA_real_, nsim, p),
       AHCox = matrix(NA_real_, nsim, p),
-      GMM = matrix(NA_real_, nsim, p)
+      GMM = matrix(NA_real_, nsim, p),
+      GMM_PO_GS = matrix(NA_real_, nsim, p)
     ),
     se = list(
       PO = matrix(NA_real_, nsim, p),
       PO_group_specific = matrix(NA_real_, nsim, p),
       PO_covariate_dependent = matrix(NA_real_, nsim, p),
       AHCox = matrix(NA_real_, nsim, p),
-      GMM = matrix(NA_real_, nsim, p)
+      GMM = matrix(NA_real_, nsim, p),
+      GMM_PO_GS = matrix(NA_real_, nsim, p)
     ),
     observed_random_censor_rate = rep(NA_real_, nsim),
     potential_censor_rate_at_tau = rep(NA_real_, nsim),
@@ -1735,6 +1760,7 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
         run_PO_covariate_dependent = run_PO_covariate_dependent,
         run_AHCox = run_AHCox,
         run_GMM = run_GMM,
+        run_GMM_PO_GS = run_GMM_PO_GS,
         po_cd_ipcw_method = po_cd_ipcw_method,
         center_vec = center_vec
       ),
@@ -1750,12 +1776,14 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
     res$beta$PO_covariate_dependent[s, ] <- out$beta$PO_covariate_dependent
     res$beta$AHCox[s, ] <- out$beta$AHCox
     res$beta$GMM[s, ] <- out$beta$GMM
+    res$beta$GMM_PO_GS[s, ] <- out$beta$GMM_PO_GS
     
     res$se$PO[s, ] <- out$se$PO
     res$se$PO_group_specific[s, ] <- out$se$PO_group_specific
     res$se$PO_covariate_dependent[s, ] <- out$se$PO_covariate_dependent
     res$se$AHCox[s, ] <- out$se$AHCox
     res$se$GMM[s, ] <- out$se$GMM
+    res$se$GMM_PO_GS[s, ] <- out$se$GMM_PO_GS
     
     res$observed_random_censor_rate[s] <- out$observed_random_censor_rate
     res$potential_censor_rate_at_tau[s] <- out$potential_censor_rate_at_tau
@@ -1777,6 +1805,7 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
       run_PO_covariate_dependent = run_PO_covariate_dependent,
       run_AHCox = run_AHCox,
       run_GMM = run_GMM,
+      run_GMM_PO_GS = run_GMM_PO_GS,
       po_cd_ipcw_method = po_cd_ipcw_method
     )
   )
@@ -1898,6 +1927,13 @@ summ_all <- function(res, setting_row) {
       res$beta_true,
       "Stacked-GMM-AH-Cox",
       setting_row
+    ),
+    summ_one(
+      res$res$beta$GMM_PO_GS,
+      res$res$se$GMM_PO_GS,
+      res$beta_true,
+      "Stacked-GMM-POGS-AH-Cox",
+      setting_row
     )
   )
 }
@@ -1938,7 +1974,8 @@ make_wide_table <- function(summary_table, value_col) {
     "PO_group_specific",
     "PO_covariate_dependent",
     "AH-Cox-only",
-    "Stacked-GMM-AH-Cox"
+    "Stacked-GMM-AH-Cox",
+    "Stacked-GMM-POGS-AH-Cox"
   )
   
   wide <- wide[, desired_cols]
@@ -2108,4 +2145,3 @@ make_target_check_table <- function(summary_table,
   
   out
 }
-
