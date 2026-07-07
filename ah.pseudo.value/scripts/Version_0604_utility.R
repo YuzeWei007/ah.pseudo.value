@@ -982,6 +982,68 @@ make_cens_covariates <- function(dat) {
   covariates4cens
 }
 
+make_censoring_lp_quantile_group <- function(dat, n_groups = 4) {
+  covariates4cens <- as.data.frame(make_cens_covariates(dat))
+  
+  df <- data.frame(
+    X = dat$X,
+    censor_status = 1 - dat$Delta,
+    covariates4cens
+  )
+  
+  cens_vars <- colnames(covariates4cens)
+  formula_cens <- as.formula(
+    paste(
+      "survival::Surv(X, censor_status) ~",
+      paste(cens_vars, collapse = " + ")
+    )
+  )
+  
+  fit <- try(
+    survival::coxph(formula_cens, data = df),
+    silent = TRUE
+  )
+  
+  if (inherits(fit, "try-error")) return(NULL)
+  
+  lp <- try(
+    as.numeric(stats::predict(fit, type = "lp")),
+    silent = TRUE
+  )
+  
+  if (inherits(lp, "try-error")) return(NULL)
+  if (length(lp) != nrow(df)) return(NULL)
+  if (any(!is.finite(lp))) return(NULL)
+  
+  probs <- seq(0, 1, length.out = n_groups + 1)
+  breaks <- unique(as.numeric(stats::quantile(lp, probs = probs, na.rm = TRUE)))
+  
+  if (length(breaks) == n_groups + 1) {
+    group <- cut(
+      lp,
+      breaks = breaks,
+      include.lowest = TRUE,
+      labels = FALSE
+    )
+  } else {
+    lp_rank <- rank(lp, ties.method = "first")
+    rank_breaks <- unique(as.numeric(stats::quantile(lp_rank, probs = probs)))
+    group <- cut(
+      lp_rank,
+      breaks = rank_breaks,
+      include.lowest = TRUE,
+      labels = FALSE
+    )
+  }
+  
+  group <- as.integer(group)
+  
+  if (length(group) != nrow(df)) return(NULL)
+  if (any(is.na(group))) return(NULL)
+  
+  group
+}
+
 # safe_ahreg_call()
 # Input: time is the observed time vector, status is the event
 # indicator vector, covariates is the AH model covariate matrix, tau
@@ -1535,6 +1597,8 @@ one_run <- function(n, beta, tau, pbc_pool,
                     run_AHCox = TRUE,
                     run_GMM = TRUE,
                     run_GMM_PO_GS = FALSE,
+                    run_PO_group_specific_quantileCensoring = FALSE,
+                    run_GMM_PO_GS_quantileCensoring = FALSE,
                     po_cd_ipcw_method = "hajek",
                     center_vec = NULL) {
   dat <- gen_data_uno(
@@ -1554,6 +1618,11 @@ one_run <- function(n, beta, tau, pbc_pool,
   )
   
   b_po_group_specific <- list(
+    beta = rep(NA_real_, p),
+    se = rep(NA_real_, p)
+  )
+  
+  b_po_group_specific_quantileCensoring <- list(
     beta = rep(NA_real_, p),
     se = rep(NA_real_, p)
   )
@@ -1578,7 +1647,13 @@ one_run <- function(n, beta, tau, pbc_pool,
     se = rep(NA_real_, p)
   )
   
+  b_gmm_po_gs_quantileCensoring <- list(
+    beta = rep(NA_real_, p),
+    se = rep(NA_real_, p)
+  )
+  
   po_group_specific <- NULL
+  po_group_specific_quantileCensoring <- NULL
   
   po <- NULL
   ahcox <- NULL
@@ -1597,6 +1672,7 @@ one_run <- function(n, beta, tau, pbc_pool,
   }
   
   # Group-specific PO
+  
   if (run_PO_group_specific || run_GMM_PO_GS) {
     po_group_specific <- get_PO_group_specific(
       X = dat$X,
@@ -1609,6 +1685,34 @@ one_run <- function(n, beta, tau, pbc_pool,
       b_po_group_specific <- fit_PO_with_se(
         Z = dat$Z,
         po = po_group_specific,
+        start = beta
+      )
+    }
+  }
+  
+  #run_PO_group_specific_quantileCensoring
+  #run_GMM_PO_GS_quantileCensoring
+  #po_group_specific_quantileCensoring
+  #b_po_group_specific_quantileCensoring
+  if (
+    run_PO_group_specific_quantileCensoring ||
+    run_GMM_PO_GS_quantileCensoring
+  ) {
+    quantile_censoring_group <- make_censoring_lp_quantile_group(dat)
+    
+    if (!is.null(quantile_censoring_group)) {
+      po_group_specific_quantileCensoring <- get_PO_group_specific(
+        X = dat$X,
+        Delta = dat$Delta,
+        tau = tau,
+        group = quantile_censoring_group
+      )
+    }
+    
+    if (run_PO_group_specific_quantileCensoring) {
+      b_po_group_specific_quantileCensoring <- fit_PO_with_se(
+        Z = dat$Z,
+        po = po_group_specific_quantileCensoring,
         start = beta
       )
     }
@@ -1632,7 +1736,12 @@ one_run <- function(n, beta, tau, pbc_pool,
   }
   
   # AH-Cox
-  if (run_AHCox || run_GMM || run_GMM_PO_GS) {
+  if (
+    run_AHCox ||
+    run_GMM ||
+    run_GMM_PO_GS ||
+    run_GMM_PO_GS_quantileCensoring
+  ) {
     ahcox <- fit_AHCox_uno_with_ipcw(dat, tau)
   }
   
@@ -1663,23 +1772,42 @@ one_run <- function(n, beta, tau, pbc_pool,
       center_vec = center_vec
     )
   }
+  # run_GMM_PO_GS_quantileCensoring
+  if (run_GMM_PO_GS_quantileCensoring) {
+    b_gmm_po_gs_quantileCensoring <- fit_GMM_AHCox_with_se(
+      dat$Z,
+      po_group_specific_quantileCensoring,
+      ahcox$ipcw,
+      beta,
+      center_vec = center_vec
+    )
+  }
+  
   
   list(
     beta = list(
       PO = b_po$beta,
       PO_group_specific = b_po_group_specific$beta,
+      PO_group_specific_quantileCensoring =
+        b_po_group_specific_quantileCensoring$beta,
       PO_covariate_dependent = b_po_covariate_dependent$beta,
       AHCox = b_ahcox$beta,
       GMM = b_gmm$beta,
-      GMM_PO_GS = b_gmm_po_gs$beta
+      GMM_PO_GS = b_gmm_po_gs$beta,
+      GMM_PO_GS_quantileCensoring =
+        b_gmm_po_gs_quantileCensoring$beta
     ),
     se = list(
       PO = b_po$se,
       PO_group_specific = b_po_group_specific$se,
+      PO_group_specific_quantileCensoring =
+        b_po_group_specific_quantileCensoring$se,
       PO_covariate_dependent = b_po_covariate_dependent$se,
       AHCox = b_ahcox$se,
       GMM = b_gmm$se,
-      GMM_PO_GS = b_gmm_po_gs$se
+      GMM_PO_GS = b_gmm_po_gs$se,
+      GMM_PO_GS_quantileCensoring =
+        b_gmm_po_gs_quantileCensoring$se
     ),
     observed_random_censor_rate = dat$observed_random_censor_rate,
     potential_censor_rate_at_tau = dat$potential_censor_rate_at_tau,
@@ -1712,6 +1840,8 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
                     run_AHCox = TRUE,
                     run_GMM = TRUE,
                     run_GMM_PO_GS = FALSE,
+                    run_PO_group_specific_quantileCensoring = FALSE,
+                    run_GMM_PO_GS_quantileCensoring = FALSE,
                     po_cd_ipcw_method = "hajek") {
   p <- length(beta)
   
@@ -1721,18 +1851,22 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
     beta = list(
       PO = matrix(NA_real_, nsim, p),
       PO_group_specific = matrix(NA_real_, nsim, p),
+      PO_group_specific_quantileCensoring = matrix(NA_real_, nsim, p),
       PO_covariate_dependent = matrix(NA_real_, nsim, p),
       AHCox = matrix(NA_real_, nsim, p),
       GMM = matrix(NA_real_, nsim, p),
-      GMM_PO_GS = matrix(NA_real_, nsim, p)
+      GMM_PO_GS = matrix(NA_real_, nsim, p),
+      GMM_PO_GS_quantileCensoring = matrix(NA_real_, nsim, p)
     ),
     se = list(
       PO = matrix(NA_real_, nsim, p),
       PO_group_specific = matrix(NA_real_, nsim, p),
+      PO_group_specific_quantileCensoring = matrix(NA_real_, nsim, p),
       PO_covariate_dependent = matrix(NA_real_, nsim, p),
       AHCox = matrix(NA_real_, nsim, p),
       GMM = matrix(NA_real_, nsim, p),
-      GMM_PO_GS = matrix(NA_real_, nsim, p)
+      GMM_PO_GS = matrix(NA_real_, nsim, p),
+      GMM_PO_GS_quantileCensoring = matrix(NA_real_, nsim, p)
     ),
     observed_random_censor_rate = rep(NA_real_, nsim),
     potential_censor_rate_at_tau = rep(NA_real_, nsim),
@@ -1761,6 +1895,10 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
         run_AHCox = run_AHCox,
         run_GMM = run_GMM,
         run_GMM_PO_GS = run_GMM_PO_GS,
+        run_PO_group_specific_quantileCensoring =
+          run_PO_group_specific_quantileCensoring,
+        run_GMM_PO_GS_quantileCensoring =
+          run_GMM_PO_GS_quantileCensoring,
         po_cd_ipcw_method = po_cd_ipcw_method,
         center_vec = center_vec
       ),
@@ -1773,17 +1911,25 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
     
     res$beta$PO[s, ] <- out$beta$PO
     res$beta$PO_group_specific[s, ] <- out$beta$PO_group_specific
+    res$beta$PO_group_specific_quantileCensoring[s, ] <-
+      out$beta$PO_group_specific_quantileCensoring
     res$beta$PO_covariate_dependent[s, ] <- out$beta$PO_covariate_dependent
     res$beta$AHCox[s, ] <- out$beta$AHCox
     res$beta$GMM[s, ] <- out$beta$GMM
     res$beta$GMM_PO_GS[s, ] <- out$beta$GMM_PO_GS
+    res$beta$GMM_PO_GS_quantileCensoring[s, ] <-
+      out$beta$GMM_PO_GS_quantileCensoring
     
     res$se$PO[s, ] <- out$se$PO
     res$se$PO_group_specific[s, ] <- out$se$PO_group_specific
+    res$se$PO_group_specific_quantileCensoring[s, ] <-
+      out$se$PO_group_specific_quantileCensoring
     res$se$PO_covariate_dependent[s, ] <- out$se$PO_covariate_dependent
     res$se$AHCox[s, ] <- out$se$AHCox
     res$se$GMM[s, ] <- out$se$GMM
     res$se$GMM_PO_GS[s, ] <- out$se$GMM_PO_GS
+    res$se$GMM_PO_GS_quantileCensoring[s, ] <-
+      out$se$GMM_PO_GS_quantileCensoring
     
     res$observed_random_censor_rate[s] <- out$observed_random_censor_rate
     res$potential_censor_rate_at_tau[s] <- out$potential_censor_rate_at_tau
@@ -1806,6 +1952,10 @@ run_sim <- function(nsim, n, beta, tau, pbc_pool,
       run_AHCox = run_AHCox,
       run_GMM = run_GMM,
       run_GMM_PO_GS = run_GMM_PO_GS,
+      run_PO_group_specific_quantileCensoring =
+        run_PO_group_specific_quantileCensoring,
+      run_GMM_PO_GS_quantileCensoring =
+        run_GMM_PO_GS_quantileCensoring,
       po_cd_ipcw_method = po_cd_ipcw_method
     )
   )
@@ -1908,6 +2058,13 @@ summ_all <- function(res, setting_row) {
       setting_row
     ),
     summ_one(
+      res$res$beta$PO_group_specific_quantileCensoring,
+      res$res$se$PO_group_specific_quantileCensoring,
+      res$beta_true,
+      "PO_group_specific_quantileCensoring",
+      setting_row
+    ),
+    summ_one(
       res$res$beta$PO_covariate_dependent,
       res$res$se$PO_covariate_dependent,
       res$beta_true,
@@ -1933,6 +2090,13 @@ summ_all <- function(res, setting_row) {
       res$res$se$GMM_PO_GS,
       res$beta_true,
       "Stacked-GMM-POGS-AH-Cox",
+      setting_row
+    ),
+    summ_one(
+      res$res$beta$GMM_PO_GS_quantileCensoring,
+      res$res$se$GMM_PO_GS_quantileCensoring,
+      res$beta_true,
+      "Stacked-GMM-POGS-quantileCensoring-AH-Cox",
       setting_row
     )
   )
@@ -1972,10 +2136,12 @@ make_wide_table <- function(summary_table, value_col) {
     "Parameter",
     "PO-only",
     "PO_group_specific",
+    "PO_group_specific_quantileCensoring",
     "PO_covariate_dependent",
     "AH-Cox-only",
     "Stacked-GMM-AH-Cox",
-    "Stacked-GMM-POGS-AH-Cox"
+    "Stacked-GMM-POGS-AH-Cox",
+    "Stacked-GMM-POGS-quantileCensoring-AH-Cox"
   )
   
   wide <- wide[, desired_cols]

@@ -66,12 +66,14 @@ z_crit <- qnorm(1 - (1 - conf_level) / 2)
 # Method flags
 # ============================================================
 
-run_PO_regular <- FALSE
+run_PO_regular <- TRUE
 run_PO_group_specific <- FALSE
 run_PO_covariate_dependent <- FALSE
 run_AHCox <- FALSE
-run_GMM <- FALSE
-run_GMM_PO_GS <- TRUE
+run_GMM <- TRUE
+run_GMM_PO_GS <- FALSE
+run_PO_group_specific_quantileCensoring <- FALSE
+run_GMM_PO_GS_quantileCensoring <- FALSE
 
 #po_cd_ipcw_method <- "hajek"
 po_cd_ipcw_method <- "binder"
@@ -82,7 +84,13 @@ methods <- c(
   if (run_PO_covariate_dependent) "PO_covariate_dependent",
   if (run_AHCox) "AH-Cox-only",
   if (run_GMM) "Stacked-GMM-AH-Cox",
-  if (run_GMM_PO_GS) "Stacked-GMM-POGS-AH-Cox"
+  if (run_GMM_PO_GS) "Stacked-GMM-POGS-AH-Cox",
+  if (run_PO_group_specific_quantileCensoring) {
+    "PO_group_specific_quantileCensoring"
+  },
+  if (run_GMM_PO_GS_quantileCensoring) {
+    "Stacked-GMM-POGS-quantileCensoring-AH-Cox"
+  }
 )
 
 
@@ -178,6 +186,10 @@ for (ii in seq_len(nrow(setting_grid))) {
       run_AHCox = run_AHCox,
       run_GMM = run_GMM,
       run_GMM_PO_GS = run_GMM_PO_GS,
+      run_PO_group_specific_quantileCensoring =
+        run_PO_group_specific_quantileCensoring,
+      run_GMM_PO_GS_quantileCensoring =
+        run_GMM_PO_GS_quantileCensoring,
       po_cd_ipcw_method = po_cd_ipcw_method
     )
   })
@@ -302,7 +314,7 @@ print(full_end_time - full_start_time)
 
 cat("\nFinal summary dimension:\n")
 print(dim(final_summary_rounded))
-cat("Expected output slots: 8 settings x 5 estimator slots x 4 parameters = 160 rows\n")
+cat("Expected output slots: 8 settings x 8 estimator slots x 4 parameters = 256 rows\n")
 cat("Only active methods are actually fit; inactive methods appear as NA with Success = 0.\n")
 
 cat("\nWide table dimensions:\n")
